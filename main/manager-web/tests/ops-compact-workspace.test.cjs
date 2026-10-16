@@ -35,7 +35,8 @@ test('quick tasks use exact service tab permissions and keep every destination a
   const cases = [
     [[], []],
     [['allowance.read'], ['allowance', 'tasks']],
-    [['pool.read'], ['allowance', 'tasks']],
+    [['pool.read'], ['allowance']],
+    [['pool.read', 'pool.adjust'], ['allowance', 'tasks']],
     [['credentials.read'], ['credentials', 'tasks']],
     [['rates.read'], ['rates']],
     [['allowance.review'], ['review']],
@@ -50,17 +51,21 @@ test('quick tasks use exact service tab permissions and keep every destination a
   }
 });
 
-test('financial quick tasks never expose credential, model or tenant content destinations', () => {
-  const user = profile(['supplier.bill.read', 'pool.read', 'allowance.review', 'official.resource.approve', 'audit.read']);
+test('reviewers only receive release reviews, usage review and audit destinations', () => {
+  const user = profile(['allowance.review', 'model.catalog.approve', 'official.resource.approve', 'ota.approve', 'audit.read']);
   const tasks = nav.availableOperationsTasks(user);
-  assert.ok(tasks.some(task => task.to === '/model-billing'));
-  assert.ok(tasks.some(task => task.to === '/approvals'));
-  assert.ok(!tasks.some(task => ['credentials', 'rates'].includes(task.to?.query?.tab)));
-  assert.deepEqual(tasks.map(task => task.key), ['/model-billing', 'review', '/audit', '/approvals', 'allowance', 'tasks']);
-  assert.equal(nav.availableOperations(user).find(item => item.path === '/services').label, '额度总池');
-  assert.equal(tasks.find(task => task.key === 'allowance').label, '额度总池');
-  assert.equal(nav.availableOperations(profile(['allowance.review']))[0].label, '用量复核');
+  assert.deepEqual(tasks.map(task => task.key), ['/approvals', 'review', '/audit']);
+  assert.equal(nav.availableOperations(user).find(item => item.path === '/services').label, '用量复核');
+  for (const path of ['/model-billing', '/model-config', '/official-resources', '/ota-management']) assert.equal(nav.canVisitOperations(user, path), false);
   for (const task of tasks) assert.equal(nav.canVisitOperations(user, typeof task.to === 'string' ? task.to : task.to.path), true);
+});
+
+test('model operators retain supplier finance and pool management alongside credentials and allowances', () => {
+  const user = profile(['credentials.read', 'allowance.read', 'rates.read', 'model.catalog.read', 'supplier.bill.read', 'pool.read', 'pool.adjust']);
+  const tasks = nav.availableOperationsTasks(user);
+  assert.equal(nav.operationsPersona(user).title, '模型与额度');
+  for (const key of ['credentials', 'allowance', 'rates', '/model-billing', 'tasks']) assert.ok(tasks.some(task => task.key === key));
+  assert.ok(!tasks.some(task => ['/approvals', 'review', '/audit'].includes(task.key)));
 });
 
 test('header renders visible authorized links, marks the current page and reacts to revoked permissions', t => {
@@ -90,11 +95,10 @@ test('home presents actionable links without loading business summaries or retai
   assert.equal(nodes(vm._render()).some(node => node.tag === 'el-empty'), true);
 });
 
-test('content operators see official resources and firmware first while pool and platform tasks stay later', () => {
-  const tasks = nav.availableOperationsTasks(profile(['pool.read', 'official.resource.read', 'ota.read', 'prompt.catalog.read', 'system.read']));
+test('content operators only see resource work and never pool or model tasks without permission', () => {
+  const tasks = nav.availableOperationsTasks(profile(['official.resource.read', 'ota.read', 'prompt.catalog.read', 'system.read']));
   assert.deepEqual(tasks.slice(0, 3).map(task => task.key), ['/official-resources', '/ota-management', '/function-plugin-management']);
-  assert.deepEqual(tasks.slice(-2).map(task => task.key), ['allowance', 'tasks']);
-  assert.equal(tasks.at(-2).label, '额度总池');
+  assert.ok(!tasks.some(task => ['allowance', 'tasks', 'credentials', 'rates'].includes(task.key)));
 });
 
 test('recovery entry occupies no space when unavailable and only offers its small action after a valid policy', async t => {

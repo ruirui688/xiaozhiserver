@@ -133,6 +133,8 @@ test('tabs default to allowance, retain deep links and never mount unauthorized 
   assert.deepEqual(panel(denied.vm), []);
   assert.match(text(denied.vm._render()), /没有可查看/);
   const finance = create(t, 'OpsServices', { permissions: ['pool.read', 'allowance.review'] });
+  assert.deepEqual(finance.vm.tabs.map(tab => tab.label), ['额度总池', '用量复核']);
+  finance.vm.$store.state.userInfo = profile(['pool.read', 'pool.adjust', 'allowance.review']);
   assert.deepEqual(finance.vm.tabs.map(tab => tab.label), ['额度总池', '用量复核', '平台任务']);
 });
 

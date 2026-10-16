@@ -1,21 +1,19 @@
 <template>
-  <main class="ops-login">
-    <section class="ops-login-story"><span class="ops-eyebrow">XIAOZHI OPERATIONS</span><h1>让服务<br>稳定向前。</h1><p>专注你的岗位，协同管理模型服务、额度和官方资源。</p></section>
+  <main class="ops-login ops-role-login">
     <section class="ops-login-card">
-      <span class="ops-mark">智</span><h2>员工登录</h2><p class="ops-muted">使用员工账号和密码进入工作台。</p>
+      <div class="ops-login-heading"><span class="ops-mark">智</span><h1>运营管理</h1></div><p class="ops-muted">选择身份，输入对应的登录密钥。</p>
       <p v-if="identityPolicyLoading" class="ops-muted" role="status">正在读取登录设置…</p>
       <template v-else-if="!loginPolicyReady"><el-alert :title="loginPolicyNotice" type="error" :closable="false" /><el-button type="text" :disabled="busy" @click="prepareLogin">重新读取登录设置</el-button></template>
       <el-alert v-if="error" :title="error" type="error" :closable="false" />
       <el-form @submit.native.prevent="login">
-        <el-form-item label="员工账号"><el-input v-model="form.username" autocomplete="username" maxlength="100" :disabled="busy" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="form.password" type="password" autocomplete="current-password" show-password :disabled="busy" /></el-form-item>
+        <el-form-item label="管理身份"><el-radio-group v-model="form.username" class="ops-role-options" :disabled="busy" @change="changeIdentity"><el-radio v-for="identity in identities" :key="identity.username" :label="identity.username" border><span class="ops-role-label">{{ identity.title }}</span><span class="ops-role-description">{{ identity.description }}</span></el-radio></el-radio-group></el-form-item>
+        <el-form-item label="登录密钥"><el-input ref="loginSecret" v-model="form.password" type="password" autocomplete="current-password" placeholder="输入所选身份的登录密钥" show-password :disabled="busy" /></el-form-item>
         <el-form-item v-if="captchaRequired" label="图形验证码"><div class="ops-captcha"><el-input v-model="form.captcha" autocomplete="off" maxlength="8" :disabled="busy" /><button type="button" aria-label="刷新图形验证码" :disabled="busy" @click="captcha"><img v-if="captchaUrl" :src="captchaUrl" alt="图形验证码" /><span v-else>刷新验证码</span></button></div></el-form-item>
         <el-form-item v-if="mfaRequired" label="动态验证码"><el-input v-model="form.otpCode" autocomplete="one-time-code" inputmode="numeric" maxlength="6" placeholder="身份验证器中的 6 位代码" :disabled="busy" /></el-form-item>
-        <el-button native-type="submit" type="primary" :loading="busy" :disabled="!loginPolicyReady || busy" class="ops-login-button">进入工作台</el-button>
+        <el-button native-type="submit" type="primary" :loading="busy" :disabled="!loginPolicyReady || busy" class="ops-login-button">进入{{ selectedIdentity ? selectedIdentity.title : '工作台' }}</el-button>
       </el-form>
       <p v-if="identityPolicyAvailable"><router-link to="/enroll">申请员工身份</router-link> · <router-link to="/recover">身份恢复</router-link></p>
-      <p v-else-if="identityPolicy && !identityPolicyError" class="ops-muted">{{ identityPolicyNotice }}</p>
-      <p class="ops-login-footer">员工身份独立授权，不与用户智控台会话互通。</p>
+      <p class="ops-login-footer">三个身份分别授权，均不能查看用户的私密聊天内容。</p>
     </section>
   </main>
 </template>
@@ -23,11 +21,13 @@
 import Api from '@/apis/api';
 import { operations } from '@/apis/platform';
 import identityPolicyState from './identityPolicyState';
+import { operationsIdentities } from './identities';
 import { getUUID, sm2Encrypt } from '@/utils';
 export default {
   mixins: [identityPolicyState],
-  data() { return { form: { username: '', password: '', captcha: '', otpCode: '' }, captchaId: '', captchaUrl: '', captchaGeneration: 0, loginDisposed: false, busy: false, error: '' }; },
+  data() { return { identities: operationsIdentities, form: { username: 'ops-keys', password: '', captcha: '', otpCode: '' }, captchaId: '', captchaUrl: '', captchaGeneration: 0, loginDisposed: false, busy: false, error: '' }; },
   computed: {
+    selectedIdentity() { return this.identities.find(identity => identity.username === this.form.username); },
     loginPolicyReady() {
       return !this.identityPolicyLoading && !this.identityPolicyError
         && typeof this.identityPolicy?.captchaRequired === 'boolean'
@@ -40,6 +40,11 @@ export default {
   created() { this.$store.dispatch('fetchPubConfig'); this.prepareLogin(); },
   beforeDestroy() { this.loginDisposed = true; this.clearCaptcha(); this.form.password = ''; this.form.otpCode = ''; },
   methods: {
+    changeIdentity() {
+      this.form.password = ''; this.form.otpCode = ''; this.error = '';
+      if (this.captchaRequired) this.captcha();
+      this.$nextTick(() => this.$refs.loginSecret?.focus());
+    },
     async prepareLogin() {
       if (this.loginDisposed || this.identityPolicyLoading) return;
       this.clearCaptcha(); this.form.otpCode = '';
@@ -65,7 +70,8 @@ export default {
       if (this.busy) return;
       this.error = '';
       if (!this.loginPolicyReady) { this.error = this.identityPolicyLoading ? '正在读取登录设置，请稍候' : this.loginPolicyNotice; return; }
-      if (!this.form.username.trim() || !this.form.password) { this.error = '请填写员工账号和密码'; return; }
+      if (!this.selectedIdentity) { this.error = '请选择管理身份'; return; }
+      if (!this.form.password) { this.error = '请输入登录密钥'; return; }
       if (this.captchaRequired && (!this.form.captcha.trim() || !this.captchaId)) { this.error = '请填写图形验证码'; return; }
       if (this.mfaRequired && !/^\d{6}$/.test(this.form.otpCode)) { this.error = '请填写 6 位动态验证码'; return; }
       const publicKey = this.$store.state.pubConfig?.sm2PublicKey;
@@ -87,3 +93,18 @@ export default {
   },
 };
 </script>
+
+<style scoped>
+.ops-role-login { display: flex; justify-content: center; align-items: center; padding: 32px 16px; box-sizing: border-box; background: #f4f6f8; }
+.ops-role-login .ops-login-card { width: 440px; max-width: 100%; padding: 32px; box-sizing: border-box; background: #fff; border: 1px solid #e3e8ee; border-radius: 16px; }
+.ops-login-heading { display: flex; align-items: center; gap: 12px; }
+.ops-login-heading h1 { margin: 0; font-size: 24px; }
+.ops-role-options { display: grid; gap: 10px; width: 100%; }
+.ops-role-options >>> .el-radio.is-bordered { display: flex; align-items: center; width: 100%; height: auto; min-height: 64px; margin: 0; padding: 12px 14px; border-radius: 8px; }
+.ops-role-options >>> .el-radio.is-checked { background: #f1f7ff; }
+.ops-role-options >>> .el-radio__label { display: grid; gap: 6px; white-space: normal; }
+.ops-role-label { font-size: 15px; font-weight: 600; }
+.ops-role-description { font-size: 12px; color: #687b89; line-height: 1.5; }
+.ops-role-login .ops-login-footer { margin-bottom: 0; }
+@media (max-width: 480px) { .ops-role-login { padding: 16px; } .ops-role-login .ops-login-card { padding: 24px 20px; } }
+</style>

@@ -3,7 +3,7 @@ export const serviceTabs = [
   { id: 'credentials', label: '供应商通道', permissions: ['credentials.read'] },
   { id: 'rates', label: '服务定价', permissions: ['rates.read'] },
   { id: 'review', label: '用量复核', permissions: ['allowance.review'] },
-  { id: 'tasks', label: '平台任务', permissions: ['allowance.read', 'pool.read', 'credentials.read'] },
+  { id: 'tasks', label: '平台任务', permissions: ['allowance.read', 'pool.adjust', 'credentials.read'] },
 ];
 
 export function exactUserId(value) {

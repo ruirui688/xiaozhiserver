@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 import time
-from datetime import datetime, timedelta, timezone as dt_timezone
-from pathlib import Path
+from datetime import datetime, timezone as dt_timezone
 from typing import TYPE_CHECKING, Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.manage_api_client import execute_reminder_action
 from core.notifications.recurrence import (
     RECURRENCE_SCHEMA,
     describe_recurrence,
     normalize_recurrence,
+)
+from core.notifications.reminder_time import (
+    DELAY_SCHEMA,
+    ReminderTimeError,
+    normalize_timezone as _normalize_timezone,
+    resolve_creation_time,
 )
 from core.utils.prompt_data import wrap_untrusted_content
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
@@ -30,7 +33,8 @@ DEVICE_REMINDER_TOOL_DESCRIPTION = {
         "name": "device_reminder",
         "description": (
             "管理当前设备的一次性或公历周期语音提醒。用户明确要求设置、查看或取消提醒时调用。"
-            "创建前必须根据系统提供的当前时间把相对时间换算成未来的Unix秒时间戳；"
+            "相对时长使用delay，由服务器计时，不要自行计算Unix时间戳；"
+            "具体日期使用remind_at和明确时区；delay和remind_at只能选一种。"
             "时间有歧义时先向用户确认，不得猜测。提醒只属于当前设备。"
         ),
         "parameters": {
@@ -45,16 +49,18 @@ DEVICE_REMINDER_TOOL_DESCRIPTION = {
                     "type": "string",
                     "description": "create时必填，用户要被提醒的简短事项。",
                 },
-                "remind_timestamp": {
-                    "type": "integer",
+                "delay": DELAY_SCHEMA,
+                "remind_at": {
+                    "type": "string",
                     "description": (
-                        "create时必填，已消除歧义的未来Unix时间戳（秒）；"
-                        "例如用户说相对时间时，先依据系统当前时间换算。"
+                        "具体日期时间：YYYY-MM-DDTHH:MM[:SS]+08:00或Z；"
+                        "无UTC偏移时必须同时提供timezone。与delay二选一。"
+                        "依据当前日期理解明天等日期，不确定先确认。"
                     ),
                 },
                 "timezone": {
                     "type": "string",
-                    "description": "IANA时区，默认Asia/Shanghai。",
+                    "description": "IANA时区，默认Asia/Shanghai；无UTC偏移的remind_at必须显式提供。",
                 },
                 "recurrence": RECURRENCE_SCHEMA,
                 "reminder_id": {
@@ -82,6 +88,8 @@ async def device_reminder(
     reminder_id: Optional[str] = None,
     request_id: Optional[str] = None,
     recurrence: Optional[dict] = None,
+    delay: Optional[dict] = None,
+    remind_at: Optional[str] = None,
 ):
     normalized_action = str(action or "").strip().lower()
     if normalized_action not in {"create", "list", "cancel"}:
@@ -109,23 +117,17 @@ async def device_reminder(
         normalized_title = _normalize_title(title)
         if normalized_title is None:
             return _response("请告诉我要提醒你的具体事项。")
-        timestamp = _normalize_timestamp(remind_timestamp)
-        if timestamp is None:
-            return _response("提醒时间无效，请说一个明确的未来时间。")
-        now = time.time()
-        if timestamp < now + 5:
-            return _response("提醒时间必须至少晚于现在五秒，请重新确认时间。")
-        if timestamp > now + 365 * 24 * 60 * 60:
-            return _response("首次提醒时间需要设置在一年以内。")
         try:
-            normalized_recurrence = normalize_recurrence(
-                recurrence, first_timestamp=timestamp
+            resolved = resolve_creation_time(
+                conn, request_id=normalized_request_id, title=normalized_title,
+                now=time.time(), timezone=timezone, recurrence=recurrence,
+                remind_timestamp=remind_timestamp, delay=delay, remind_at=remind_at,
             )
-        except (ValueError, TypeError, OverflowError):
-            return _response("重复规则无效，请确认重复频率、星期和截止时间。")
-        timezone_name, zone = _normalize_timezone(timezone)
-        if zone is None:
-            return _response("提醒时区无效，请使用明确的IANA时区。")
+        except ReminderTimeError as error:
+            return _response(str(error))
+        timestamp = resolved.timestamp
+        normalized_recurrence = resolved.recurrence
+        timezone_name, zone = resolved.timezone_name, resolved.zone
         remind_at = (
             datetime.fromtimestamp(timestamp, dt_timezone.utc)
             .isoformat()
@@ -240,47 +242,6 @@ def _normalize_title(value) -> str | None:
     title = re.sub(r"[\x00-\x1f\x7f]", " ", value)
     title = re.sub(r"\s+", " ", title).strip()
     return title if 1 <= len(title) <= 200 else None
-
-
-def _normalize_timestamp(value) -> int | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(numeric) or not numeric.is_integer():
-        return None
-    return int(numeric)
-
-
-def _normalize_timezone(value):
-    if value is None or (isinstance(value, str) and not value.strip()):
-        name = "Asia/Shanghai"
-    elif isinstance(value, str):
-        name = value.strip()
-    else:
-        return "", None
-    if not name or len(name) > 64 or re.search(r"[\x00-\x1f\x7f]", name):
-        return name, None
-    try:
-        return name, ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        zoneinfo_root = Path("/usr/share/zoneinfo").resolve()
-        try:
-            zoneinfo_path = (zoneinfo_root / name).resolve()
-            zoneinfo_path.relative_to(zoneinfo_root)
-            if zoneinfo_path.is_file():
-                with zoneinfo_path.open("rb") as zone_file:
-                    return name, ZoneInfo.from_file(zone_file, key=name)
-        except (OSError, ValueError):
-            pass
-        # Some relocated Conda environments retain a stale compiled TZPATH.
-        # Asia/Shanghai has had a fixed UTC+08:00 offset since 1991, which is
-        # sufficient for the supported one-year reminder horizon.
-        if name == "Asia/Shanghai":
-            return name, dt_timezone(timedelta(hours=8), name)
-        return name, None
 
 
 def _normalize_request_id(value) -> str | None:

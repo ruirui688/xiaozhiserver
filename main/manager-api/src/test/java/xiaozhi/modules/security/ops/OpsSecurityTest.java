@@ -252,9 +252,9 @@ class OpsSecurityTest {
         for(String table:List.of("ops_identity_change","ops_login_limit","ops_audit_event"))
             assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Integer.class),table);
     }
-    @Test void roleSeparationPreventsPoolSelfFundingAndSelfReview() {
+    @Test void roleSeparationPreventsFundingAndSettlementSelfReview() {
         assertFalse(OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions().contains("pool.adjust"));
-        for(Set<String> roles:List.of(Set.of("ALLOWANCE","ALLOWANCE_POOL"),Set.of("ALLOWANCE_POOL","ALLOWANCE_REVIEW"),Set.of("IAM_REQUEST","SUPPORT"),Set.of("OTA","OTA_REVIEW"),Set.of("OFFICIAL_CONTENT","CONTENT_REVIEW"),Set.of("MODEL_CATALOG","MODEL_REVIEW")))
+        for(Set<String> roles:List.of(Set.of("ALLOWANCE_POOL","ALLOWANCE_REVIEW"),Set.of("ALLOWANCE","ALLOWANCE_REVIEW"),Set.of("IAM_REQUEST","SUPPORT"),Set.of("OTA","OTA_REVIEW"),Set.of("OFFICIAL_CONTENT","CONTENT_REVIEW"),Set.of("MODEL_CATALOG","MODEL_REVIEW")))
             assertThrows(RuntimeException.class,()->OpsPermissionCatalog.requireCompatible(roles));
     }
     @Test void employeeChoosesFactorsAndNeedsTwoIndependentIdentityApprovals() {

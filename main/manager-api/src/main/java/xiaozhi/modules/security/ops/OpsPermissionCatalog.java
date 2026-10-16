@@ -31,8 +31,9 @@ public final class OpsPermissionCatalog {
     );
     private OpsPermissionCatalog() {}
     public static void requireCompatible(Set<String> roles) {
+        // Model operations own funding and issuance; settlement review stays separate.
         for (Set<String> pair : java.util.List.of(Set.of("IAM_REQUEST", "IAM_APPROVE"),
-                Set.of("ALLOWANCE", "ALLOWANCE_POOL"), Set.of("ALLOWANCE", "ALLOWANCE_REVIEW"), Set.of("ALLOWANCE_POOL", "ALLOWANCE_REVIEW"),
+                Set.of("ALLOWANCE_POOL", "ALLOWANCE_REVIEW"), Set.of("ALLOWANCE", "ALLOWANCE_REVIEW"),
                 Set.of("OTA", "OTA_REVIEW"), Set.of("OFFICIAL_CONTENT", "CONTENT_REVIEW"),
                 Set.of("MODEL_CATALOG", "MODEL_REVIEW"))) {
             if (roles.containsAll(pair)) throw new RenException("申请、执行和复核岗位必须分离");

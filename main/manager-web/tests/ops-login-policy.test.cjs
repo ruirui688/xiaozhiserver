@@ -45,22 +45,22 @@ function create(t, { initialPolicy = policy(), login, profile = { audience: 'OPS
       this.$router = { replace: async route => { calls.routes.push(route); } };
     },
   });
-  Object.assign(vm.form, { username: ' test-staff ', password: PASSWORD });
+  Object.assign(vm.form, { username: 'ops-keys', password: PASSWORD });
   t.after(() => vm.$destroy());
   return { vm, calls, setPolicy(value) { currentPolicy = value; }, setLogin(value) { currentLogin = value; } };
 }
 
-test('managed employees log in with username and password when additional challenges are disabled', async t => {
+test('selected identities log in with encrypted keys when additional challenges are disabled', async t => {
   const { vm, calls } = create(t);
   await settled();
   assert.equal(vm.identityPolicyAvailable, false);
   assert.equal(vm.loginPolicyReady, true);
-  assert.deepEqual(labels(vm), ['员工账号', '密码']);
+  assert.deepEqual(labels(vm), ['管理身份', '登录密钥']);
   assert.equal(submit(vm).data.attrs.disabled, false);
   assert.equal(calls.captcha.length, 0);
   Object.assign(vm.form, { captcha: 'STALE', otpCode: '123456' });
   await vm.login();
-  assert.deepEqual(calls.login, [{ username: 'test-staff', password: 'test-only-ciphertext' }]);
+  assert.deepEqual(calls.login, [{ username: 'ops-keys', password: 'test-only-ciphertext' }]);
   assert.deepEqual(calls.encryption, [{ key: 'test-only-public-key', plaintext: PASSWORD }]);
   assert.deepEqual(calls.commits.map(call => call.name), ['setToken', 'setUserInfo']);
   assert.deepEqual(calls.routes, ['/home']);
@@ -71,21 +71,21 @@ test('managed employees log in with username and password when additional challe
 test('CAPTCHA policy requires a challenge and includes it in the encrypted password', async t => {
   const { vm, calls } = create(t, { initialPolicy: policy({ captchaRequired: true }) });
   await settled();
-  assert.deepEqual(labels(vm), ['员工账号', '密码', '图形验证码']);
+  assert.deepEqual(labels(vm), ['管理身份', '登录密钥', '图形验证码']);
   assert.equal(calls.captcha.length, 1);
   await vm.login();
   assert.equal(calls.login.length, 0);
   assert.match(vm.error, /图形验证码/);
   vm.form.captcha = 'ABCDE';
   await vm.login();
-  assert.deepEqual(calls.login, [{ username: 'test-staff', password: 'test-only-ciphertext', captchaId: calls.captcha[0].id }]);
+  assert.deepEqual(calls.login, [{ username: 'ops-keys', password: 'test-only-ciphertext', captchaId: calls.captcha[0].id }]);
   assert.equal(calls.encryption[0].plaintext, `ABCDE${PASSWORD}`);
 });
 
 test('MFA-only policy validates six digits and preserves a leading zero', async t => {
   const { vm, calls } = create(t, { initialPolicy: policy({ mfaRequired: true }) });
   await settled();
-  assert.deepEqual(labels(vm), ['员工账号', '密码', '动态验证码']);
+  assert.deepEqual(labels(vm), ['管理身份', '登录密钥', '动态验证码']);
   assert.equal(calls.captcha.length, 0);
   for (const otpCode of ['', '12345', '1234567', 'abcdef']) {
     vm.form.otpCode = otpCode;
@@ -95,17 +95,17 @@ test('MFA-only policy validates six digits and preserves a leading zero', async 
   }
   vm.form.otpCode = '012345';
   await vm.login();
-  assert.deepEqual(calls.login, [{ username: 'test-staff', password: 'test-only-ciphertext', otpCode: '012345' }]);
+  assert.deepEqual(calls.login, [{ username: 'ops-keys', password: 'test-only-ciphertext', otpCode: '012345' }]);
   assert.equal(calls.encryption[0].plaintext, PASSWORD);
 });
 
 test('both enabled challenges preserve the strengthened login flow', async t => {
   const { vm, calls } = create(t, { initialPolicy: policy({ captchaRequired: true, mfaRequired: true }) });
   await settled();
-  assert.deepEqual(labels(vm), ['员工账号', '密码', '图形验证码', '动态验证码']);
+  assert.deepEqual(labels(vm), ['管理身份', '登录密钥', '图形验证码', '动态验证码']);
   Object.assign(vm.form, { captcha: 'ABCDE', otpCode: '012345' });
   await vm.login();
-  assert.deepEqual(calls.login, [{ username: 'test-staff', password: 'test-only-ciphertext', captchaId: calls.captcha[0].id, otpCode: '012345' }]);
+  assert.deepEqual(calls.login, [{ username: 'ops-keys', password: 'test-only-ciphertext', captchaId: calls.captcha[0].id, otpCode: '012345' }]);
   assert.equal(calls.encryption[0].plaintext, `ABCDE${PASSWORD}`);
 });
 
@@ -212,4 +212,31 @@ test('late policy and CAPTCHA responses do not create images after leaving the l
   ready.calls.captcha[1].callback({ data: null });
   assert.equal(ready.vm.captchaUrl, '');
   assert.equal(ready.vm.form.password, '');
+});
+
+ test('identity selector only offers three accounts and changing identity clears prior secrets', async t => {
+  const { vm, calls } = create(t);
+  await settled();
+  assert.deepEqual(vm.identities.map(identity => identity.username), ['ops-keys', 'ops-resources', 'ops-finance']);
+  assert.equal(nodes(vm._render()).filter(node => node.tag === 'el-radio').length, 3);
+  vm.form.username = 'ops-resources';
+  vm.form.otpCode = '012345';
+  vm.changeIdentity();
+  assert.equal(vm.form.password, '');
+  assert.equal(vm.form.otpCode, '');
+  await vm.login();
+  assert.equal(calls.login.length, 0);
+  vm.form.password = PASSWORD;
+  await vm.login();
+  assert.equal(calls.login[0].username, 'ops-resources');
+});
+
+test('tampered identity is rejected before encryption or login', async t => {
+  const { vm, calls } = create(t);
+  await settled();
+  vm.form.username = 'unlisted-user';
+  await vm.login();
+  assert.equal(calls.login.length, 0);
+  assert.equal(calls.encryption.length, 0);
+  assert.match(vm.error, /请选择管理身份/);
 });

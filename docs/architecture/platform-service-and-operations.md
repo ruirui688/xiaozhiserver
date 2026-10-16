@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: manager-api
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/platform/
   - main/manager-api/src/main/java/xiaozhi/modules/security/ops/
@@ -24,7 +24,7 @@ Web 构建包含用户入口 `index.html` 和员工入口 `ops.html`，员工从
 
 运营导航直接显示当前岗位可用的功能；首页提供紧凑的常用操作入口。服务管理通过 `tab` 查询参数保留页签，优先展示用户额度，平台内部任务置后。额度账户按用户名和完整用户 ID 搜索，列表与发放选择器共用受 `allowance.read` 保护的分页查询，只补充用户名，不返回联系方式、认证信息或用户内容。用户 ID 始终以字符串传输，避免浏览器丢失长整数精度；金额的两位小数展示不改变原始精度和提交值。空的历史额度申请、不可用的身份恢复入口不占用常用页面。
 
-运营登录当前仅要求账号、密码。服务端配置 `OPS_LOGIN_MFA_REQUIRED`、`OPS_LOGIN_CAPTCHA_REQUIRED` 分别控制动态验证码、图形验证码，默认均为 `false`；登录页根据身份策略接口返回的布尔值展示，策略读取失败时禁止提交并提供重试。客户端不能覆盖服务端策略，关闭额外验证不删除已有验证器密文，也不改变用户登录、身份申请或恢复流程的验证要求。密码继续使用 SM2 加密传输，保留 IP/账号限流、停用账号检查、会话过期及登录审计。
+运营登录页直接选择「模型与额度」「内容与设备」「审核与审计」之一，再输入该账号的登录密钥。三个选项分别对应既有 `ops-keys`、`ops-resources`、`ops-finance` 账号；登录密钥就是该账号现有密码，不是供应商 API Key，不创建另一套凭据系统。身份选择只填写登录账号，实际权限仍由服务器返回的有效授权决定，不能通过切换选项取得其他岗位权限。服务端配置 `OPS_LOGIN_MFA_REQUIRED`、`OPS_LOGIN_CAPTCHA_REQUIRED` 分别控制动态验证码、图形验证码，默认均为 `false`；登录页根据身份策略接口返回的布尔值展示，策略读取失败时禁止提交并提供重试。客户端不能覆盖服务端策略，关闭额外验证不删除已有验证器密文，也不改变用户登录、身份申请或恢复流程的验证要求。密码继续使用 SM2 加密传输，保留 IP/账号限流、停用账号检查、会话过期及登录审计。
 
 不再保留超级管理员角色或租户内容旁路。员工主体没有租户 `userId`，不能凭运营身份访问用户聊天、音频、私人记忆或知识库，也不能通过后台重置用户密码获得其登录身份。
 
@@ -113,11 +113,13 @@ DeepSeek 余额查询使用部署环境中的独立财务凭据和明确账号�
 
 | 账号 | 职责 | 固定岗位 |
 | --- | --- | --- |
-| `ops-keys` | 模型与额度 | `ALLOWANCE`、`CREDENTIALS`、`RATES`、`MODEL_CATALOG`、`SUPPORT` |
-| `ops-resources` | 内容与设备 | `ALLOWANCE_POOL`、`OFFICIAL_CONTENT`、`OTA`、`OPERATIONS` |
-| `ops-finance` | 财务与审批 | `SUPPLIER_FINANCE`、`ALLOWANCE_REVIEW`、`MODEL_REVIEW`、`CONTENT_REVIEW`、`OTA_REVIEW`、`AUDIT` |
+| `ops-keys` | 模型与额度（含财务） | `ALLOWANCE`、`ALLOWANCE_POOL`、`SUPPLIER_FINANCE`、`CREDENTIALS`、`RATES`、`MODEL_CATALOG`、`SUPPORT` |
+| `ops-resources` | 内容与设备 | `OFFICIAL_CONTENT`、`OTA`、`OPERATIONS` |
+| `ops-finance` | 审核与审计 | `ALLOWANCE_REVIEW`、`MODEL_REVIEW`、`CONTENT_REVIEW`、`OTA_REVIEW`、`AUDIT` |
 
-额度发放池管理、额度发放和额度复核分别由三个账号承担；模型、官方内容和 OTA 的发布与审批仍由不同账号执行。所有现有业务审批、岗位冲突检查和禁止自批规则继续生效，不因减少账号而跳过。三个账号均不得读取用户聊天、音频、私人记忆或知识库正文。
+模型与额度岗位统一管理供应商密钥、模型目录、平台费率、额度总池、用户额度发放和供应商账单/余额/资源包查询；平台额度和供应商实际费用仍是两套账，资源包仅查询。总池管理与额度发放可以同岗，异常用量复核由独立审核岗位承担，复核不能与发放或总池管理同岗。模型、官方内容和 OTA 的发布与审批仍由不同账号执行。所有现有业务审批、岗位冲突检查和禁止自批规则继续生效，不因减少账号而跳过。三个账号均不得读取用户聊天、音频、私人记忆或知识库正文。
+
+2026-10-16 岗位整理迁移仅将既有固定账号的总池及供应商财务授权归并到 `ops-keys`，保留 `ops-finance` 的员工 ID 和账号名供审核与审计使用，不创建账号、重置密码或修改用户账目。缺少有效且兼容的模型与额度账号时不能先撤走原授权；上线前须核对迁移前提和最终有效授权。权限变更使受影响员工旧会话失效，需要重新登录。其他自定义账号不自动套用三岗位模板。
 
 匿名只读 `GET /ops/auth/identity-policy` 提供网页身份申请与恢复的可用状态，以及登录所需的 `mfaRequired`、`captchaRequired` 开关，不返回员工名单或身份因素。缺少有效的 IAM 申请或审批岗位时，前端关闭 `enroll`、`recover` 入口，服务端在接受申请或消费恢复码之前拒绝请求；策略读取失败也不能按可用处理。该检查防止恢复码已消费却无人审批，不代替申请时和批准时的身份、委派与职责分离校验。
 

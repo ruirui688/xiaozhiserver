@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
@@ -202,6 +202,8 @@ provider_code 命中真实服务端工具
 `device_reminder` 同时是 Server Plugin 保留名。统一工具管理器会检查注册键、工具定义名和 schema 中的函数名，并识别带一层或多层 `mcp_` 前缀的别名；来自 Server MCP、Device IoT、Device MCP 或 MCP Endpoint 的同名/别名工具不会注册，执行阶段也会再次拒绝任何非 Server Plugin 来源。保留名本身不会启用功能，仍必须通过当前智能体白名单和真实 Server Plugin 实现。
 
 语音工具只提供 `create / list / cancel` 三种动作；创建或取消必须以工具成功结果为准，模型不得把自然语言理解或普通讨论未来时间冒充为已保存日程。小程序在相同的 manager-api 事实之上额外提供编辑入口，不在页面或设备本地维护独立定时器。语音创建记录可以编辑标题和时间，但其来源设备是幂等锚点，不能直接改投其他设备；换设备需要取消后重新创建。
+
+创建时间使用 `delay={"amount":2,"unit":"minutes"}` 或 `remind_at`，二者互斥。相对时长由服务器依据当前时钟计算，模型不计算 Unix 时间戳；`days` 表示连续 24 小时，不是本地日历的“明天”。具体日期使用 ISO 日期时间；无 UTC 偏移时必须显式给出 IANA `timezone`，遇到夏令时歧义须明确偏移。旧 `remind_timestamp` 仅保留运行时兼容，不再展示给模型。首次创建仍须在五秒后至一年内，manager-api 保留最终校验。
 
 创建参数可包含受限 `recurrence` 对象，支持 ONCE、DAILY、WEEKLY、MONTHLY、YEARLY；省略时为一次性，周期确认与查询需明确说明规则。时间歧义先确认，不把农历、生理期预测或任意 cron 静默转换成已支持规则。模型只负责理解和工具调用，到点下发不再调用 LLM。
 

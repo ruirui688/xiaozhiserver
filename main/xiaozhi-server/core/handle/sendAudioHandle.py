@@ -892,9 +892,10 @@ def schedule_reply_termination(conn, reason, *, generation=None):
 
 
 async def send_display_message(conn: "ConnectionHandler", text):
-    """发送纯显示消息"""
+    """Tool progress, not microphone transcription; keep legacy display shape."""
     message = {
         "type": "stt",
+        "source": "tool",
         "text": text,
         "session_id": conn.session_id
     }

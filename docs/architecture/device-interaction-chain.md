@@ -1173,6 +1173,16 @@ App 必须同时收到能力 ACK、speech_route(server/server) 和 ready 才发�
 持续上传仍为 16 kHz 单声道、60 ms raw Opus，由服务器 VAD/ASR 分句。不能上传 PCM 冒充 Opus。
 下行 raw Opus 由 App 解码为 24 kHz PCM；hello 回显的是输入参数，不应据此设定播放采样率。
 
+工具进度兼容旧设备的 `type=stt` 外形，但明确添加 `source=tool`；它不是 ASR，不应进入用户转录
+或重置识别到首音频的计时。App 0.12 显示独立状态，不把 `% device_reminder` 当成用户发言。
+对未携带来源的旧服务器，仅兼容严格的 `% <工具标识>` 显示格式；明确的 ASR 来源优先，
+不能按任意百分号文本过滤用户语音。此修正不改变工具权限、聊天事实或 TTS 内容。
+
+App 0.12 的 Concentus 固定版本带可复现的 HYBRID 修正：CELT 降采样输出在 `accum` 模式下
+必须与已有 SILK PCM 饱和相加，不得覆盖低频。修复保留 24 kHz 播放和正常语速，不以降采样绕过；
+库来源、补丁、SHA 与 SILK/HYBRID/CELT 波形回归在 App 工作区 `tools/CONCENTUS.md`。
+离线波形一致不等同于真机扬声器、AEC 和播放时序验收，发布状态仍以手机验收记录为准。
+
 状态错误只包含白名单 `code`、阶段 `stage`、固定提示、`retryable` 与 `retry_after_ms`，
 不回显异常原文，不为提示调用付费 TTS。共享 ASR 异常边界和托管豆包录音/流式通路传播错误；
 正常静音和空识别结果不伪装成故障。额度拒绝阻断本连接后续识别尝试；新 App 停止录音，需用户重新开始。

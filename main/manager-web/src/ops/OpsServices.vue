@@ -29,7 +29,7 @@ export default {
   components: { HeaderBar, OpsAllowance, OpsCredentials, OpsRates, OpsPlatformAccounts, OpsReservationReview },
   data() { return { navigationError: '' }; },
   computed: {
-    sectionTitle() { return hasPermission(this.$store.state.userInfo, 'credentials.read') || hasPermission(this.$store.state.userInfo, 'rates.read') || hasPermission(this.$store.state.userInfo, 'allowance.read') ? '模型与额度' : '额度与复核'; },
+    sectionTitle() { return hasPermission(this.$store.state.userInfo, 'credentials.read') || hasPermission(this.$store.state.userInfo, 'rates.read') || hasPermission(this.$store.state.userInfo, 'allowance.read') ? '模型与额度' : hasPermission(this.$store.state.userInfo, 'pool.read') ? '额度总池' : '用量复核'; },
     tabs() {
       const profile = this.$store.state.userInfo;
       return serviceTabs.filter(item => item.permissions.some(permission => hasPermission(profile, permission)))

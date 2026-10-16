@@ -1,13 +1,14 @@
 ---
 status: canonical
 owner: manager-api
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/reminder/
   - main/manager-api/src/main/resources/db/changelog/
   - main/xiaozhi-server/core/spoken_notifications.py
   - main/xiaozhi-server/core/api/device_notification_handler.py
   - main/xiaozhi-server/plugins_func/functions/device_reminder.py
+  - main/xiaozhi-server/core/notifications/reminder_time.py
 ---
 
 # 服务端提醒任务中心
@@ -101,6 +102,10 @@ Java 每分钟输出固定字段统计：领取、限流、接纳、重试、未
 领取权有期限并带唯一令牌。旧执行者失去领取权后不得覆盖新执行结果。执行标识须区分安排版本和本次计划时间；普通重试不换标识，编辑或下一周期不能被误认为旧执行的重复。
 
 创建请求防重复指纹与当前调度游标分离：周期滚动不能导致同一语音请求重试被错误判为不同请求。缺少返回结果时，客户端应查询确认，不把不确定结果当成创建失败后任意重建。
+
+语音相对时长由 Python 转为绝对时间后提交同一 Java 接口，不新增调度器。每个连接最多保留 256 个创建请求锚点（参数与身份摘要、原始绝对时间）；同 ID 重试复用原时间，变更内容或目标身份被拒绝，满额拒绝新建而不驱逐旧锚点。操作只有短临界区，没有新增线程、定时器或后台扫描，连接销毁后释放。重放由 Java 先查持久幂等记录；未存在的安排仍须通过当前时间窗口。该缓存不是跨连接持久去重，新连接或新调用 ID 仍可能形成新安排。
+
+首次具体日期解析拒绝夏令时跳时或重叠的无偏移输入；这是创建时的歧义确认，不改变上文已经保存的周期规则在后续执行中的顺延/选择策略。时间输入合同见[功能插件](function-plugin-architecture.md#设备日程提醒)。
 
 设备换绑、编辑取消与下发的原有串行化保护不得仅为缩短代码而删除。当前下发需保留有界 HTTP 超时与有限并发；若未来去除网络调用期间的数据库行锁，必须同时引入下游可验证的版本栅栏或同等保证，再修改取消语义。
 

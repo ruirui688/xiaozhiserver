@@ -1642,3 +1642,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/platform-registration-trial-outbox-20261015.sql
+  - changeSet:
+      id: ops-three-role-boundaries-20261016
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/ops-three-role-boundaries-20261016.sql

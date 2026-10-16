@@ -89,7 +89,7 @@ test('failed model lookup blocks saving, retry restores it, and destruction clea
 
 test('all three roles have distinct titles derived only from actual grants', () => {
   const nav = loadModule('src/ops/navigation.js'); const profile = permissions => ({ audience: 'OPS', username: 'arbitrary-name', permissions });
-  const cases = [[['credentials.read', 'allowance.read'], '模型与额度'], [['official.resource.read', 'ota.read'], '内容与设备'], [['supplier.bill.read', 'allowance.review'], '财务与审批']];
+  const cases = [[['credentials.read', 'allowance.read', 'supplier.bill.read', 'pool.read', 'pool.adjust'], '模型与额度'], [['official.resource.read', 'ota.read'], '内容与设备'], [['allowance.review', 'model.catalog.approve', 'official.resource.approve', 'ota.approve', 'audit.read'], '审核与审计']];
   for (const [permissions, title] of cases) { const user = profile(permissions); assert.equal(nav.operationsPersona(user).title, title); assert.equal(nav.operationsPageTitle(user, { path: '/home' }), `${title} · 智控运营`); }
   assert.equal(nav.operationsPageTitle(profile(['credentials.read']), { path: '/services', query: { tab: 'credentials' } }), '供应商通道 · 模型与额度 · 智控运营');
   assert.equal(nav.operationsPersona({ audience: 'USER', permissions: ['credentials.read'] }).title, '运营工作台');
