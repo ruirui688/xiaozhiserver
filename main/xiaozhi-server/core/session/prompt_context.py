@@ -72,7 +72,11 @@ def with_music_library(conn, messages, available_tools=None):
         conn.logger.bind(tag=__name__).debug("Music context unavailable: {}", type(exc).__name__)
         return messages
     if not entries:
-        return messages
+        return inject_trusted_follow_up_system_prompt(messages, (
+            "<music_library>\n当前曲库为空，没有可播放的歌曲。"
+            "不要调用 play_music，不要编造曲目或声称正在播放；"
+            "用户要求播放时说明需要先上传歌曲。\n</music_library>"
+        ))
     callable_now = available_tools is None or any(
         item.get("function", {}).get("name") == "play_music" for item in available_tools
     )

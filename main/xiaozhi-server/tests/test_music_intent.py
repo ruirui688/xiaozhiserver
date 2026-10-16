@@ -4,8 +4,11 @@ import json
 import os
 import queue
 import types
+import time
+from unittest.mock import Mock
 from pathlib import Path
 
+import pytest
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
@@ -51,8 +54,7 @@ def test_music_library_context_is_visible_to_llm_without_pre_dispatch(monkeypatc
 
 
 def test_music_metadata_aliases_match_local_song():
-    play_music.MUSIC_CACHE.clear()
-    play_music.MUSIC_CACHE["music_metadata"] = {
+    metadata = {
         "brand-song.mp3": {
             "description": "品牌主题曲。",
             "aliases": ["品牌星光", "星光之歌", "主题歌"],
@@ -61,8 +63,8 @@ def test_music_metadata_aliases_match_local_song():
 
     music_files = ["brand-song.mp3", "ambient-track.mp3"]
 
-    assert play_music._find_best_match("品牌星光", music_files) == "brand-song.mp3"
-    assert play_music._find_best_match("星光之歌", music_files) == "brand-song.mp3"
+    assert play_music._find_best_match("品牌星光", music_files, metadata) == "brand-song.mp3"
+    assert play_music._find_best_match("星光之歌", music_files, metadata) == "brand-song.mp3"
 
 
 def _music_library_conn(music_dir, refresh_time=300):
@@ -250,3 +252,177 @@ def test_play_music_waits_until_file_playback_messages_are_enqueued(tmp_path):
         and message.content_type == ContentType.ACTION
         for message in queued_messages
     )
+    assert response.result == play_music.PlaybackResult.QUEUED.value
+    assert conn.last_tool_context == "music"
+
+
+def _playback_conn(music_dir):
+    conn = _music_library_conn(music_dir)
+    conn.logger = Mock()
+    conn.logger.bind.return_value = conn.logger
+    conn.tts = types.SimpleNamespace(tts_text_queue=queue.Queue(), store_tts_text=Mock())
+    conn.dialogue = types.SimpleNamespace(put=Mock())
+    conn.sentence_id = "original"
+    conn.last_tool_context = None
+    return conn
+
+
+def _call_music(conn, song="random"):
+    async def run():
+        conn.loop = asyncio.get_running_loop()
+        return await asyncio.to_thread(play_music.play_music, conn, song)
+    return asyncio.run(run())
+
+
+def _assert_no_playback(conn):
+    assert conn.tts.tts_text_queue.empty()
+    conn.tts.store_tts_text.assert_not_called()
+    conn.dialogue.put.assert_not_called()
+    assert conn.sentence_id == "original"
+    assert conn.last_tool_context is None
+
+
+@pytest.mark.parametrize("song", ["random", "不存在的歌"])
+def test_empty_library_never_claims_playback(tmp_path, song):
+    conn = _playback_conn(tmp_path)
+    response = _call_music(conn, song)
+    assert response.action.name == "RESPONSE"
+    assert response.result == response.response == play_music.PlaybackResult.EMPTY.value
+    _assert_no_playback(conn)
+
+
+def test_missing_library_does_not_fall_back_to_default_music(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    default = tmp_path / "music"
+    default.mkdir()
+    (default / "default.mp3").write_bytes(b"test audio")
+    conn = _playback_conn(tmp_path / "missing")
+    response = _call_music(conn)
+    assert response.result == play_music.PlaybackResult.UNAVAILABLE.value
+    _assert_no_playback(conn)
+
+
+def test_orphan_optimized_audio_is_not_a_song(tmp_path):
+    cache = tmp_path / play_music.MUSIC_CACHE_DIR_NAME
+    cache.mkdir()
+    (cache / "removed.mp3.p3").write_bytes(b"test cached audio")
+    conn = _playback_conn(tmp_path)
+    conn.config["plugins"]["play_music"]["music_ext"] = [".mp3", ".p3"]
+    assert play_music.list_music_prompt_entries(conn) == []
+    assert _call_music(conn).result == play_music.PlaybackResult.EMPTY.value
+    _assert_no_playback(conn)
+
+
+def test_deleted_nested_song_is_rechecked_before_enqueue(tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    song = nested / "removed.mp3"
+    song.write_bytes(b"test audio")
+    conn = _playback_conn(tmp_path)
+    assert play_music.list_available_music(conn) == ["removed"]
+    song.unlink()  # 顶层 mtime 没变、TTL 没到，命中旧快照。
+    assert _call_music(conn).result == play_music.PlaybackResult.MISSING.value
+    _assert_no_playback(conn)
+
+
+def test_connections_do_not_share_the_first_library(tmp_path):
+    full = tmp_path / "full"
+    empty = tmp_path / "empty"
+    full.mkdir()
+    empty.mkdir()
+    song = full / "first-library.mp3"
+    song.write_bytes(b"test audio")
+    first = _playback_conn(full)
+    second = _playback_conn(empty)
+    assert play_music.list_available_music(first) == ["first-library"]
+    assert play_music.list_available_music(second) == []
+    assert _call_music(second).result == play_music.PlaybackResult.EMPTY.value
+    _assert_no_playback(second)
+    assert _call_music(first).result == play_music.PlaybackResult.QUEUED.value
+    assert list(first.tts.tts_text_queue.queue)[2].content_file == str(song)
+
+
+def test_configuration_refresh_changes_library_and_extensions(tmp_path):
+    song = tmp_path / "only.mp3"
+    song.write_bytes(b"test audio")
+    conn = _playback_conn(tmp_path)
+    assert play_music.list_available_music(conn) == ["only"]
+    conn.config["plugins"]["play_music"]["music_ext"] = [".wav"]
+    assert play_music.list_available_music(conn) == []
+    assert _call_music(conn).result == play_music.PlaybackResult.EMPTY.value
+    conn.config["plugins"]["play_music"]["music_dir"] = str(tmp_path / "missing")
+    assert _call_music(conn).result == play_music.PlaybackResult.UNAVAILABLE.value
+    _assert_no_playback(conn)
+
+
+def test_library_cache_is_bounded(tmp_path, monkeypatch):
+    play_music.MUSIC_CACHE.clear()
+    monkeypatch.setattr(play_music, "MUSIC_CACHE_LIMIT", 2)
+    first = play_music.initialize_music_handler(_music_library_conn(tmp_path / "a"))
+    play_music.initialize_music_handler(_music_library_conn(tmp_path / "b"))
+    play_music.initialize_music_handler(_music_library_conn(tmp_path / "c"))
+    assert len(play_music.MUSIC_CACHE) == 2
+    assert first["music_dir"] == str(tmp_path / "a")
+
+
+def test_library_scan_failure_is_reported_without_internal_details(tmp_path, monkeypatch):
+    def fail_scan(*args):
+        raise OSError("private internal directory")
+    monkeypatch.setattr(play_music, "get_music_files", fail_scan)
+    conn = _playback_conn(tmp_path)
+    response = _call_music(conn)
+    assert response.result == play_music.PlaybackResult.FAILED.value
+    assert "private" not in response.result
+    _assert_no_playback(conn)
+
+
+def test_queue_failure_is_not_reported_as_success(tmp_path):
+    (tmp_path / "song.mp3").write_bytes(b"test audio")
+    conn = _playback_conn(tmp_path)
+    conn.tts.tts_text_queue.put = Mock(side_effect=RuntimeError("queue unavailable"))
+    response = _call_music(conn)
+    assert response.action.name == "RESPONSE"
+    assert response.result == play_music.PlaybackResult.FAILED.value
+    assert conn.last_tool_context is None
+    conn.dialogue.put.assert_not_called()
+
+
+def test_expired_submission_cannot_enqueue_music(tmp_path):
+    (tmp_path / "song.mp3").write_bytes(b"test audio")
+    conn = _playback_conn(tmp_path)
+    result = asyncio.run(play_music.handle_music_command(
+        conn, "随机播放音乐", deadline=time.monotonic() - 1,
+    ))
+    assert result is play_music.PlaybackResult.EXPIRED
+    _assert_no_playback(conn)
+
+
+def test_timeout_cancels_pending_music_task(tmp_path, monkeypatch):
+    future = Mock()
+    future.result.side_effect = play_music.concurrent.futures.TimeoutError()
+
+    def submit(coro, loop):
+        coro.close()
+        return future
+
+    monkeypatch.setattr(play_music.asyncio, "run_coroutine_threadsafe", submit)
+    conn = _playback_conn(tmp_path)
+    conn.loop = Mock()
+    response = play_music.play_music(conn, "random")
+    assert response.action.name == "RESPONSE"
+    assert "超时" in response.result
+    future.cancel.assert_called_once_with()
+    _assert_no_playback(conn)
+
+
+def test_empty_library_context_overrides_old_music_history(tmp_path):
+    from core.session.prompt_context import with_music_library
+
+    conn = _music_library_conn(tmp_path)
+    conn.func_handler = types.SimpleNamespace(has_tool=lambda name: name == "play_music")
+    history = [{"role": "assistant", "content": "正在为您播放音乐"}]
+    messages = with_music_library(conn, history, [{"function": {"name": "play_music"}}])
+    context = next(m["content"] for m in messages if m["role"] == "system")
+    assert "当前曲库为空" in context
+    assert "不要调用 play_music" in context
+    assert len(history) == 1

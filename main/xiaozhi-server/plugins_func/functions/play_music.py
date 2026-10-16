@@ -4,10 +4,12 @@ import time
 import random
 import difflib
 import json
-import traceback
 import asyncio
 import concurrent.futures
 import uuid
+import threading
+from collections import OrderedDict
+from enum import Enum
 from pathlib import Path
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from core.utils.dialogue import Message
@@ -19,10 +21,22 @@ if TYPE_CHECKING:
 
 TAG = __name__
 
-MUSIC_CACHE = {}
+MUSIC_CACHE = OrderedDict()
+MUSIC_CACHE_LOCK = threading.Lock()
+MUSIC_CACHE_LIMIT = 32
 MUSIC_CACHE_DIR_NAME = ".xiaozhi-music-cache"
 MUSIC_METADATA_FILE_NAME = ".xiaozhi-music-metadata.json"
 MUSIC_PROMPT_DESCRIPTION_LIMIT = 120
+
+
+class PlaybackResult(Enum):
+    QUEUED = "音乐已加入播放队列"
+    EMPTY = "当前曲库没有可播放的歌曲，请先在曲库中上传歌曲。"
+    UNAVAILABLE = "当前曲库暂时不可用，请检查曲库配置。"
+    MISSING = "这首歌曲已不存在，请刷新曲库后重试。"
+    FAILED = "音乐播放任务提交失败，请稍后再试。"
+    EXPIRED = "音乐播放任务提交超时，请稍后再试。"
+
 
 play_music_function_desc = {
     "type": "function",
@@ -45,6 +59,7 @@ play_music_function_desc = {
 
 @register_function("play_music", play_music_function_desc, ToolType.SYSTEM_CTL)
 def play_music(conn: "ConnectionHandler", song_name: str):
+    future = None
     try:
         music_intent = (
             f"播放音乐 {song_name}" if song_name != "random" else "随机播放音乐"
@@ -57,17 +72,26 @@ def play_music(conn: "ConnectionHandler", song_name: str):
                 action=Action.RESPONSE, result="系统繁忙", response="请稍后再试"
             )
 
+        timeout = int(conn.config.get("tool_call_timeout", 30))
         future = asyncio.run_coroutine_threadsafe(
-            handle_music_command(conn, music_intent),
+            handle_music_command(conn, music_intent, deadline=time.monotonic() + timeout),
             conn.loop,
         )
-        future.result(timeout=int(conn.config.get("tool_call_timeout", 30)))
+        result = future.result(timeout=timeout)
+        if result is not PlaybackResult.QUEUED:
+            message = (
+                result.value if isinstance(result, PlaybackResult)
+                else PlaybackResult.FAILED.value
+            )
+            return ActionResponse(action=Action.RESPONSE, result=message, response=message)
         conn.logger.bind(tag=TAG).info("音乐播放任务已入队")
 
         return ActionResponse(
-            action=Action.RECORD, result="正在为您播放音乐", response="正在为您播放音乐"
+            action=Action.RECORD, result=result.value, response=result.value
         )
     except concurrent.futures.TimeoutError:
+        if future is not None:
+            future.cancel()
         conn.logger.bind(tag=TAG).error("音乐播放任务提交超时")
         return ActionResponse(
             action=Action.RESPONSE,
@@ -75,9 +99,10 @@ def play_music(conn: "ConnectionHandler", song_name: str):
             response="播放音乐超时了，请稍后再试",
         )
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"处理音乐意图错误: {e}")
+        conn.logger.bind(tag=TAG).error(f"处理音乐意图错误: {type(e).__name__}")
         return ActionResponse(
-            action=Action.RESPONSE, result=str(e), response="播放音乐时出错了"
+            action=Action.RESPONSE, result=PlaybackResult.FAILED.value,
+            response=PlaybackResult.FAILED.value,
         )
 
 
@@ -94,7 +119,7 @@ def _extract_song_name(text):
     return None
 
 
-def _find_best_match(potential_song, music_files):
+def _find_best_match(potential_song, music_files, music_metadata):
     """查找最匹配的歌曲"""
     best_match = None
     highest_ratio = 0
@@ -103,7 +128,7 @@ def _find_best_match(potential_song, music_files):
     for music_file in music_files:
         song_name = os.path.splitext(music_file)[0]
         match_texts = [song_name, music_file]
-        metadata = MUSIC_CACHE.get("music_metadata", {}).get(music_file, {})
+        metadata = music_metadata.get(music_file, {})
         description = metadata.get("description", "")
         if description:
             match_texts.append(description)
@@ -150,20 +175,6 @@ def list_music_prompt_entries(conn: "ConnectionHandler", limit=30):
     music_config = initialize_music_handler(conn)
     entries = music_config.get("music_file_names", [])
     return entries[:limit]
-
-
-def _config_bool(value, default=False):
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on", "是", "开启"}:
-            return True
-        if normalized in {"0", "false", "no", "off", "否", "关闭"}:
-            return False
-    return bool(value)
 
 
 def _load_music_metadata(music_dir):
@@ -254,108 +265,78 @@ def _music_dir_mtimes(music_dir):
     return dir_mtime, metadata_mtime
 
 
-def _refresh_music_cache():
+def _refresh_music_cache(catalog):
     (
-        MUSIC_CACHE["music_files"],
-        MUSIC_CACHE["music_file_names"],
-        MUSIC_CACHE["music_metadata"],
+        catalog["music_files"],
+        catalog["music_file_names"],
+        catalog["music_metadata"],
     ) = get_music_files(
-        MUSIC_CACHE["music_dir"], MUSIC_CACHE["music_ext"]
+        catalog["music_dir"], catalog["music_ext"]
     )
-    MUSIC_CACHE["scan_time"] = time.time()
-    dir_mtime, metadata_mtime = _music_dir_mtimes(MUSIC_CACHE["music_dir"])
-    MUSIC_CACHE["dir_mtime"] = dir_mtime
-    MUSIC_CACHE["metadata_mtime"] = metadata_mtime
+    catalog["scan_time"] = time.time()
+    dir_mtime, metadata_mtime = _music_dir_mtimes(catalog["music_dir"])
+    catalog["dir_mtime"] = dir_mtime
+    catalog["metadata_mtime"] = metadata_mtime
 
 
-def _music_cache_is_stale():
-    music_dir = MUSIC_CACHE.get("music_dir")
+def _music_cache_is_stale(catalog):
+    music_dir = catalog.get("music_dir")
     if not music_dir:
         return False
     dir_mtime, metadata_mtime = _music_dir_mtimes(music_dir)
-    if dir_mtime != MUSIC_CACHE.get("dir_mtime"):
+    if dir_mtime != catalog.get("dir_mtime"):
         return True
-    if metadata_mtime != MUSIC_CACHE.get("metadata_mtime"):
+    if metadata_mtime != catalog.get("metadata_mtime"):
         return True
     # 子目录内的增删不会改变顶层目录 mtime，因此仍需按 refresh_time 兜底重扫。
     return (
-        time.time() - MUSIC_CACHE.get("scan_time", 0)
-        > MUSIC_CACHE.get("refresh_time", 60)
+        time.time() - catalog.get("scan_time", 0)
+        > catalog.get("refresh_time", 60)
     )
 
 
-def _refresh_music_cache_if_stale():
-    """磁盘曲库变化后重建缓存。
-
-    曲库提示词（<music_library>、工具描述）和播放共用这份进程内缓存。如果只在播放时
-    才检查目录 mtime，删除歌曲后模型仍会看到旧曲库，持续回复"给你放一首《…》"，
-    而真正播放时又报"未找到MP3音乐文件"。
-    """
-    if not _music_cache_is_stale():
-        return False
-    _refresh_music_cache()
-    return True
-
-
 def initialize_music_handler(conn: "ConnectionHandler"):
-    global MUSIC_CACHE
-    if MUSIC_CACHE == {}:
-        plugins_config = conn.config.get("plugins", {})
-        if "play_music" in plugins_config:
-            MUSIC_CACHE["music_config"] = plugins_config["play_music"]
-            MUSIC_CACHE["music_dir"] = os.path.abspath(
-                MUSIC_CACHE["music_config"].get("music_dir", "./music")  # 默认路径修改
-            )
-            MUSIC_CACHE["music_cache_dir"] = os.path.join(
-                MUSIC_CACHE["music_dir"], MUSIC_CACHE_DIR_NAME
-            )
-            MUSIC_CACHE["music_ext"] = MUSIC_CACHE["music_config"].get(
-                "music_ext", (".mp3", ".wav", ".p3")
-            )
-            MUSIC_CACHE["refresh_time"] = MUSIC_CACHE["music_config"].get(
-                "refresh_time", 60
-            )
-            MUSIC_CACHE["announce_before_play"] = _config_bool(
-                MUSIC_CACHE["music_config"].get("announce_before_play"), False
-            )
-        else:
-            MUSIC_CACHE["music_dir"] = os.path.abspath("./music")
-            MUSIC_CACHE["music_cache_dir"] = os.path.join(
-                MUSIC_CACHE["music_dir"], MUSIC_CACHE_DIR_NAME
-            )
-            MUSIC_CACHE["music_ext"] = (".mp3", ".wav", ".p3")
-            MUSIC_CACHE["refresh_time"] = 60
-            MUSIC_CACHE["announce_before_play"] = False
-        # 获取音乐文件列表
-        _refresh_music_cache()
-    # 提示词与播放共用同一份缓存，每次取用前都按磁盘现状刷新，
-    # 保证删除/新增歌曲后曲库上下文立即生效，不必等一次播放或重启进程。
-    _refresh_music_cache_if_stale()
-    return MUSIC_CACHE
+    """按配置复用有界曲库快照，不让第一个连接决定所有连接的曲库。"""
+    config = conn.config.get("plugins", {}).get("play_music") or {}
+    music_dir = os.path.abspath(config.get("music_dir", "./music"))
+    music_ext = tuple(config.get("music_ext", (".mp3", ".wav", ".p3")))
+    refresh_time = config.get("refresh_time", 60)
+    key = (music_dir, music_ext, refresh_time)
+    with MUSIC_CACHE_LOCK:
+        catalog = MUSIC_CACHE.get(key)
+        if catalog is None or _music_cache_is_stale(catalog):
+            catalog = {
+                "music_dir": music_dir,
+                "music_cache_dir": os.path.join(music_dir, MUSIC_CACHE_DIR_NAME),
+                "music_ext": music_ext,
+                "refresh_time": refresh_time,
+            }
+            _refresh_music_cache(catalog)
+            MUSIC_CACHE[key] = catalog
+        MUSIC_CACHE.move_to_end(key)
+        while len(MUSIC_CACHE) > MUSIC_CACHE_LIMIT:
+            MUSIC_CACHE.popitem(last=False)
+        return catalog
 
 
-async def handle_music_command(conn: "ConnectionHandler", text):
-    # initialize_music_handler 已按磁盘现状刷新缓存，这里不再重复检查 mtime。
-    initialize_music_handler(conn)
-    global MUSIC_CACHE
-    conn.last_tool_context = "music"
-
+async def handle_music_command(conn: "ConnectionHandler", text, deadline=None):
     """处理音乐播放指令"""
+    catalog = initialize_music_handler(conn)
     clean_text = re.sub(r"[^\w\s]", "", text).strip()
     conn.logger.bind(tag=TAG).debug(f"检查是否是音乐命令: {clean_text}")
 
     # 尝试匹配具体歌名
-    if os.path.exists(MUSIC_CACHE["music_dir"]):
+    if os.path.isdir(catalog["music_dir"]):
         potential_song = _extract_song_name(clean_text)
         if potential_song:
-            best_match = _find_best_match(potential_song, MUSIC_CACHE["music_files"])
+            best_match = _find_best_match(
+                potential_song, catalog["music_files"], catalog["music_metadata"]
+            )
             if best_match:
                 conn.logger.bind(tag=TAG).info(f"找到最匹配的歌曲: {best_match}")
-                await play_local_music(conn, specific_file=best_match)
-                return True
+                return await play_local_music(conn, best_match, catalog, deadline)
     # 检查是否是通用播放音乐命令
-    await play_local_music(conn)
-    return True
+    return await play_local_music(conn, catalog=catalog, deadline=deadline)
 
 
 def _get_random_play_prompt(song_name):
@@ -375,11 +356,11 @@ def _get_random_play_prompt(song_name):
     return random.choice(prompts)
 
 
-def _get_optimized_music_path(selected_music, music_path):
+def _get_optimized_music_path(selected_music, music_path, catalog):
     if os.path.splitext(selected_music)[1].lower() == ".p3":
         return music_path
 
-    cache_dir = MUSIC_CACHE.get("music_cache_dir")
+    cache_dir = catalog.get("music_cache_dir")
     if not cache_dir:
         return music_path
 
@@ -417,34 +398,38 @@ def _enqueue_playback_boundary(conn: "ConnectionHandler", sentence_type: Sentenc
     )
 
 
-async def play_local_music(conn: "ConnectionHandler", specific_file=None):
-    global MUSIC_CACHE
+async def play_local_music(
+    conn: "ConnectionHandler", specific_file=None, catalog=None, deadline=None,
+):
     """播放本地音乐文件"""
     try:
-        if not os.path.exists(MUSIC_CACHE["music_dir"]):
-            conn.logger.bind(tag=TAG).error(
-                f"音乐目录不存在: " + MUSIC_CACHE["music_dir"]
-            )
-            return
+        if catalog is None:
+            catalog = initialize_music_handler(conn)
+        if not os.path.isdir(catalog["music_dir"]):
+            conn.logger.bind(tag=TAG).error("音乐目录不可用")
+            return PlaybackResult.UNAVAILABLE
 
         # 确保路径正确性
         if specific_file:
             selected_music = specific_file
-            music_path = os.path.join(MUSIC_CACHE["music_dir"], specific_file)
+            music_path = os.path.join(catalog["music_dir"], specific_file)
         else:
-            if not MUSIC_CACHE["music_files"]:
-                conn.logger.bind(tag=TAG).error("未找到MP3音乐文件")
-                return
-            selected_music = random.choice(MUSIC_CACHE["music_files"])
-            music_path = os.path.join(MUSIC_CACHE["music_dir"], selected_music)
+            if not catalog["music_files"]:
+                conn.logger.bind(tag=TAG).info("曲库中没有可播放的音乐文件")
+                return PlaybackResult.EMPTY
+            selected_music = random.choice(catalog["music_files"])
+            music_path = os.path.join(catalog["music_dir"], selected_music)
 
-        if not os.path.exists(music_path):
+        if not os.path.isfile(music_path):
             conn.logger.bind(tag=TAG).error(f"选定的音乐文件不存在: {music_path}")
-            return
-        playback_path = _get_optimized_music_path(selected_music, music_path)
+            return PlaybackResult.MISSING
+        playback_path = _get_optimized_music_path(selected_music, music_path, catalog)
         if playback_path != music_path:
             conn.logger.bind(tag=TAG).info(f"使用低延时音乐缓存: {playback_path}")
         text = _get_random_play_prompt(selected_music)
+        # 扫描可能耗时；线程已报告超时后，不再安排迟到播放。
+        if deadline is not None and time.monotonic() >= deadline:
+            return PlaybackResult.EXPIRED
         conn.sentence_id = str(uuid.uuid4().hex)
 
         _enqueue_playback_boundary(conn, SentenceType.FIRST)
@@ -460,7 +445,9 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
         )
         _enqueue_music_file(conn, playback_path)
         _enqueue_playback_boundary(conn, SentenceType.LAST)
+        conn.last_tool_context = "music"
+        return PlaybackResult.QUEUED
 
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"播放音乐失败: {str(e)}")
-        conn.logger.bind(tag=TAG).error(f"详细错误: {traceback.format_exc()}")
+        conn.logger.bind(tag=TAG).error(f"播放音乐失败: {type(e).__name__}")
+        return PlaybackResult.FAILED

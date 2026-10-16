@@ -480,7 +480,7 @@ ai_model_provider(model_type=Plugin).fields[].description.default
   -> 服务端执行真实本地文件播放
 ```
 
-`play_music` 的工具结果使用 `Action.RECORD` 写入工具调用审计，不再请求 LLM 二次改写。真实出声由 TTS 队列完成：先以普通 `ContentType.TEXT` 播放“即将为您播放 具体歌曲”等选曲提示语，再以 `ContentType.FILE` 播放本地音乐文件，并用 `LAST/ACTION` 结束边界触发流式 provider flush。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 不能单独作为播放成功或失败依据。
+`play_music` 仅在真实入队后使用 `Action.RECORD` 写入“音乐已加入播放队列”，不再请求 LLM 二次改写。空曲库、目录不可用、源文件消失、异常或超时使用 `Action.RESPONSE` 直接说明失败；空曲库也必须注入 `<music_library>` 空状态，不能因省略当前曲库而让模型沿用历史曲目。真实出声由 TTS 队列完成：先以普通 `ContentType.TEXT` 播放“即将为您播放 具体歌曲”等选曲提示语，再以 `ContentType.FILE` 播放本地音乐文件，并用 `LAST/ACTION` 结束边界触发流式 provider flush。工具调用审计只证明调用及入队结果，不是设备出声确认。
 
 纯语言活动的短工具由 `ServerPluginExecutor` 按白名单注册；完整规则在成功启动后才由请求组装层注入，详见第 11–12 节。
 

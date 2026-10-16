@@ -99,11 +99,18 @@ provider_code 命中 all_function_registry
 ```text
 LLM / intent_llm 选择 play_music
   -> play_music 等待异步选曲和入队完成
-  -> 返回 Action.RECORD，聊天记录保留工具调用审计
+  -> 仅成功入队返回 Action.RECORD（音乐已加入播放队列），保留工具调用审计
   -> TTS 队列按 FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION 播放
 ```
 
 其中 `MIDDLE/TEXT` 是“即将为您播放/正在为您播放 具体歌曲”这类选曲提示语，必须按普通 TTS 播出；不要只发屏幕状态消息。`MIDDLE/FILE` 是真实本地音乐文件，流式 TTS provider 会依赖后续 `LAST/ACTION` 把暂存音频 flush 到设备。播放、唱某首歌、随机播放和曲库查询不应再由旧意图入口硬编码派发；模型应根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达决定是否调用工具。
+
+空曲库、目录不可用、源文件消失、入队异常和提交超时返回 `Action.RESPONSE` 的真实失败说明，
+不得固定返回播放成功。空曲库同时注入明确的 `<music_library>` 空状态；即使模型仍调用工具，
+执行端也必须拒绝安排播放。缓存按目录、扩展名和刷新周期隔离，最多保留 32 个配置快照，
+保留目录/元数据 mtime 与 TTL 刷新；一次调用固定使用自己的快照。隐藏转码缓存不是独立曲目，
+源文件不存在时不可播放其残留缓存。提交超时取消待运行任务，入队前再次检查提交截止时间。
+入队成功不等于设备已经出声，不新增扬声器播放确认。
 
 托管长期记忆不是 Function Plugin。选择 `managed_memory` 后，运行时不会注册 `manage_memory` 工具，而是在设备会话结束时沿用官方 Memory provider 的 `save_memory(dialogue)` 触发方式：
 
