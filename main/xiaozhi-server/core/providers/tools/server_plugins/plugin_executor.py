@@ -283,11 +283,17 @@ class ServerPluginExecutor(ToolExecutor):
     def _init_web_search_description(self, tool_description):
         """Keep web search routing precise even when backend config overrides description."""
         guidance = (
-            " 仅用于用户要求的联网检索或最新外部事实，不用于本地知识库、播放或设备控制。"
-            "相对时间依据本轮system中的北京时间；查询保留原话的相对时间、绝对日期、对象及事实目标，"
-            "不得改成泛泛资料或补充未确认的对象、地点、日期。"
+            "实际查询合同优先于下文目录说明：仅用于用户要求的联网检索或最新外部事实，"
+            "不用于本地知识库、播放或设备控制。query使用简洁自然的搜索词，"
+            "保留用户明确指定的具体日期、对象、来源和事实目标，不得改成泛泛资料。"
+            "本轮system中的北京时间用于理解相对时间和选择time_range，"
+            "不要求写进query；不得自行填入年月、具体日期或时间戳，也不得添加未确认的对象或地点。"
             "时效检索同时设置time_range：今天为day，最近或最新通常为week，"
             "用户明确范围优先，可选day/week/month/year；历史查询或无时效要求时省略。"
+            "同一用户请求只调用一次web_search；服务端在该次调用内部执行初查，"
+            "必要时由模型改写关键词并最多补查一次，内部最多两次真实检索。"
+            "调用完成后不要再发起搜索；以工具返回的实际查询次数为准，"
+            "不得声称未实际执行的查询或查询次数。"
         )
         try:
             function_desc = tool_description["function"]

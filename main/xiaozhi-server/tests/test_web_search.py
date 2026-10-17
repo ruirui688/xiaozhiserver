@@ -74,14 +74,14 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     result = web_search._search_metaso("mk-test", "南非加拿大比赛结果", 5)
 
     assert captured["url"] == "https://metaso.cn/api/v1/search"
-    assert captured["payload"]["q"] == "南非加拿大比赛结果 当前北京时间 2026-06-29 15:00 北京时间"
+    assert captured["payload"]["q"] == "南非加拿大比赛结果"
     assert captured["payload"]["size"] == 5
     assert captured["payload"]["includeRawContent"] is True
-    assert "实际搜索查询：南非加拿大比赛结果 当前北京时间 2026-06-29 15:00 北京时间" in result
+    assert "实际搜索查询：南非加拿大比赛结果" in result
     assert "当前参考时间：2026-06-29 15:00 北京时间" in result
     assert "只能依据下面列出的搜索结果回答" in result
     assert "判断结果是否直接回答用户原始问题" in result
-    assert "不要使用旧知识、猜测或再次搜索" in result
+    assert "不要使用旧知识或猜测" in result
     assert "证据不足或相互冲突的内容明确标为无法确认" in result
     assert "只回答用户询问的范围" in result
     assert "不能从搜索结果直接定位的内容，说明未查到明确依据" in result
@@ -120,14 +120,12 @@ def test_metaso_empty_result_preserves_beijing_context_and_stops(monkeypatch):
         current_time_context="2026-08-06 09:30 北京时间",
     )
 
-    assert captured["payload"]["q"].endswith(
-        "当前北京时间 2026-08-06 09:30 北京时间"
-    )
+    assert captured["payload"]["q"] == "用户提交的完整查询"
     assert "结果状态：本次查询未返回网页" in result
     assert "模型提交查询：用户提交的完整查询" in result
     assert "当前参考时间：2026-08-06 09:30 北京时间" in result
     assert "空结果不等于目标事实不存在" in result
-    assert "这是当前请求唯一一次联网搜索" in result
+    assert "是否允许改写关键词补查" in result
     assert "不得使用模型旧知识、常识推断、预测" in result
 
 
@@ -156,14 +154,12 @@ def test_tavily_empty_result_preserves_beijing_context_and_stops(monkeypatch):
         current_time_context="2026-08-06 09:30 北京时间",
     )
 
-    assert captured["payload"]["query"].endswith(
-        "当前北京时间 2026-08-06 09:30 北京时间"
-    )
+    assert captured["payload"]["query"] == "用户提交的完整查询"
     assert "结果状态：本次查询未返回网页" in result
     assert "模型提交查询：用户提交的完整查询" in result
     assert "搜索源：Tavily" in result
     assert "当前参考时间：2026-08-06 09:30 北京时间" in result
-    assert "这是当前请求唯一一次联网搜索" in result
+    assert "是否允许改写关键词补查" in result
 
 
 def test_metaso_search_can_disable_raw_content_and_time_context(monkeypatch):
@@ -214,12 +210,15 @@ def test_web_search_description_preserves_user_temporal_intent():
         "properties"
     ]["query"]["description"]
 
-    assert "同时保留用户的相对时间表达" in description
-    assert "绝对日期" in description
+    assert "保留用户明确日期和相对时间表达" in description
+    assert "不自行添加年月或时间戳" in description
     assert "事实目标和来源要求" in description
-    assert "同一用户请求只有一次联网搜索机会" in description
-    assert "必须保留用户原话中的相对时间短语" in query_description
-    assert "查询词要同时包含原始相对时间短语和根据当前北京时间换算出的绝对日期" in query_description
+    assert "首次无可用证据时可内部改写关键词补查一次" in description
+    assert "必须保留用户的时间约束、目标对象和问题类型" in query_description
+    assert "简短的核心检索词组合" in query_description
+    assert "常用检索表达同义改写" in query_description
+    assert "相对时间通过 time_range 表达筛选范围" in query_description
+    assert "用户明确指定的具体日期必须保留" in query_description
     assert "查询词要体现用户要查的事实目标" in query_description
     assert "来源要求" in query_description
 
@@ -290,7 +289,7 @@ def test_web_search_success_disables_follow_up_tools(monkeypatch):
 
     assert result.action == web_search.Action.REQLLM
     assert result.next_llm_tools_enabled is False
-    assert "唯一一次 web_search 已经完成" in result.next_llm_system_prompt
+    assert "web_search 已经完成" in result.next_llm_system_prompt
     assert "不得再次调用联网搜索" in result.next_llm_system_prompt
 
 
@@ -384,7 +383,7 @@ def test_iso_dates_and_markup_only_evidence():
 
 def test_metaso_expands_candidates_once_then_limits_usable_results(monkeypatch):
     calls = []
-    def post(key, query, count, raw):
+    def post(key, query, count, raw, **kwargs):
         calls.append(count)
         return {"webpages": [
             {"title": "旧闻", "date": "2020-01-01", "snippet": "不应出现在本次最新新闻回答中的历史内容。"},
@@ -404,3 +403,79 @@ def test_timestamp_date_is_converted_to_beijing_and_unknown_zone_is_not_invented
     assert str(parse_date("2026-10-17T23:00:00-04:00")) == "2026-10-18"
     assert parse_date("2026-10-17T12:00:00") is None
     assert parse_date("2026-02-30") is None
+
+
+def test_time_context_is_opt_in_and_explicit_user_dates_are_preserved():
+    query = "2026年10月17日发布的公告"
+    now = "2026-10-18 12:00 北京时间"
+    assert web_search._build_search_query(query, now) == query
+    assert web_search._build_search_query(query, now, True) == f"{query} 当前北京时间 {now}"
+
+
+def test_plugin_default_does_not_append_clock_but_explicit_config_can(monkeypatch):
+    from types import SimpleNamespace
+    seen = []
+    def search(*args, **kwargs):
+        seen.append(kwargs["include_time_context"])
+        return "test"
+    monkeypatch.setattr(web_search, "_search_metaso", search)
+    config = {"provider": "metaso", "api_key": "test"}
+    conn = SimpleNamespace(config={"plugins": {"web_search": config}})
+    web_search.web_search(conn, "最新科技新闻", time_range="week")
+    config["include_time_context"] = True
+    conn.sentence_id = "new-request"
+    web_search.web_search(conn, "最新科技新闻", time_range="week")
+    assert seen == [False, True]
+
+
+def test_no_evidence_allows_one_rewrite_then_stops_and_bounds_timeout(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    def search(*args, **kwargs):
+        calls.append(kwargs["request_timeout"])
+        return web_search.SearchContext(f"用户原始查询：{args[1]}\n没有证据", False)
+    monkeypatch.setattr(web_search, "_search_metaso", search)
+    conn = SimpleNamespace(sentence_id="turn-1", config={"plugins": {"web_search": {"provider": "metaso", "api_key": "test"}}})
+    monkeypatch.setattr(web_search, "refine_query", lambda *a: "检索表达二")
+    first = web_search.web_search(conn, "检索表达一", time_range="week")
+    second = web_search.web_search(conn, "检索表达二", time_range="week")
+    third = web_search.web_search(conn, "检索表达三", time_range="week")
+    assert first.next_llm_tools_enabled is False
+    assert "实际已发送搜索次数：2" in first.result
+    assert "用户原始查询：检索表达一" in first.result
+    assert "原始调用查询：检索表达一" in first.result
+    assert "第2次实际检索词：检索表达二" in first.result
+    assert "有限检索样本" in first.next_llm_system_prompt
+    assert second.next_llm_tools_enabled is False
+    assert third.next_llm_tools_enabled is False
+    assert len(calls) == 2 and all(0 < timeout <= 15 for timeout in calls)
+
+
+def test_no_sentence_id_does_not_offer_unavailable_retry(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(web_search, "_search_metaso", lambda *a, **k: web_search.SearchContext("无证据", False))
+    conn = SimpleNamespace(config={"plugins": {"web_search": {"provider": "metaso", "api_key": "test"}}})
+    assert web_search.web_search(conn, "query").next_llm_tools_enabled is False
+
+
+def test_result_metadata_reflects_filtered_and_empty_sources():
+    empty = web_search._build_empty_search_context("q", "test", "2026-10-17", "q")
+    filtered = web_search._build_search_context("q", "test", [{"date": "2000-01-01", "content": "具有足够多的文本但已经过期的历史事实内容"}], current_time_context="2026-10-17", time_range="day")
+    assert isinstance(empty, str) and empty.has_evidence is False
+    assert isinstance(filtered, str) and filtered.has_evidence is False
+
+
+def test_success_and_network_failure_do_not_authorize_another_supplier_call(monkeypatch):
+    from types import SimpleNamespace
+    for fail in (False, True):
+        calls = []
+        def search(*args, **kwargs):
+            calls.append(1)
+            if fail:
+                raise web_search.requests.exceptions.Timeout("timeout")
+            return web_search.SearchContext("有效证据", True)
+        monkeypatch.setattr(web_search, "_search_metaso", search)
+        conn = SimpleNamespace(sentence_id="turn", config={"plugins": {"web_search": {"provider": "metaso", "api_key": "test"}}})
+        assert web_search.web_search(conn, "first").next_llm_tools_enabled is False
+        assert web_search.web_search(conn, "another").next_llm_tools_enabled is False
+        assert len(calls) == 1
