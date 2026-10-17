@@ -1,5 +1,6 @@
 import requests
 import time
+from plugins_func.functions.search_evidence import TIME_RANGES, filter_evidence
 from config.logger import setup_logging
 from core.utils.current_time import get_current_datetime
 from plugins_func.register import (
@@ -23,7 +24,7 @@ _DEFAULT_DESCRIPTION = (
     "完整保留用户确认的对象、时间范围、地点、事实目标和来源要求（例如官方、一手或权威来源），"
     "去掉不影响检索的寒暄或操作话术，"
     "不得增加用户未确认的实体、日期或限制条件。相对时间按系统提供的北京时间理解，"
-    "同时保留用户的相对时间表达和换算后的绝对日期。"
+    "同时保留用户的相对时间表达和换算后的绝对日期。时效问题必须填写 time_range：今天用 day，最近/最新默认 week；用户明确其他范围时按用户要求选择。"
 )
 
 _SEARCH_FINAL_RESPONSE_PROMPT = (
@@ -58,7 +59,12 @@ WEB_SEARCH_FUNCTION_DESC = {
                         "删除不影响检索的寒暄和“帮我搜”等操作话术，但不要删掉事实约束。"
                         "不要脱离用户原意自行补充未确认的对象、地点、日期或来源。"
                     ),
-                }
+                },
+                "time_range": {
+                    "type": "string",
+                    "enum": ["day", "week", "month", "year"],
+                    "description": "相对当前北京时间的证据发布时间范围：今天 day，最近/最新 week，近一个月 month，近一年 year。历史事件或无时效要求时省略；用户明确范围优先。",
+                },
             },
             "required": ["query"],
         },
@@ -133,6 +139,8 @@ def _build_search_context(
     current_time_context: str = "",
     search_query: str = "",
     content_max_chars: int = 3000,
+    time_range: str = None,
+    result_limit: int = None,
 ) -> str:
     current_time_context = current_time_context or _get_beijing_time_context()
     lines = [
@@ -149,15 +157,21 @@ def _build_search_context(
         "4. 日期可能是发布时间或事件时间，不能把不确定的日期当成确定事实。",
         "5. 只回答用户询问的范围，使用适合语音播报的纯文本。",
     ]
-    if answer:
-        lines.append(f"搜索源摘要：{answer}")
+    items, excluded = filter_evidence(items, time_range, current_time_context)
+    if time_range:
+        lines.append(f"证据时间范围：{time_range}（按供应商结构化日期校验；日期仅说明网页时间，不证明事件时间或相关性）")
+    lines.append(f"证据筛选：空内容 {excluded['empty']}，重复 {excluded['duplicate']}，时间不符 {excluded['stale']}，时效无法验证 {excluded['undated']}")
+    if not items:
+        lines.append("结果状态：没有可用的直接证据；无法确认用户所问事实，不能据此断言事实不存在。")
+    # Provider-wide generated summaries can contain excluded pages and must
+    # never bypass the per-source evidence gate.
     lines.append("搜索结果明细：")
     lines.append("<untrusted_search_results>")
 
-    for i, item in enumerate(items, 1):
+    for i, item in enumerate(items[:result_limit], 1):
         title = _first_text(item, ("title", "name")) or "无标题"
         link = _first_text(item, ("link", "url", "href"))
-        date = _first_text(item, ("date", "published_date", "publishedAt", "time"))
+        date = _first_text(item, ("date", "published_date", "publishedAt", "publishedDate", "time"))
         snippet = _first_text(item, ("summary", "snippet", "content", "description"))
         content = _first_text(item, ("content", "raw_content", "rawContent"))
         content = _truncate_text(content, content_max_chars)
@@ -165,6 +179,8 @@ def _build_search_context(
         lines.append(f"{i}. 标题：{title}")
         if date:
             lines.append(f"   日期：{date}")
+        if not item.get("_date_verified"):
+            lines.append("   时效：日期未知或无法解析，不能据此确认最新情况")
         if link:
             lines.append(f"   链接：{link}")
         if snippet:
@@ -238,6 +254,7 @@ def _search_metaso(
     include_raw_content: bool = True,
     content_max_chars: int = 3000,
     include_time_context: bool = True,
+    time_range: str = None,
 ) -> str:
     """调用秘塔搜索API"""
     current_time_context = current_time_context or _get_beijing_time_context()
@@ -246,7 +263,8 @@ def _search_metaso(
         current_time_context,
         include_time_context=include_time_context,
     )
-    data = _post_metaso(api_key, search_query, max_results, include_raw_content)
+    candidate_count = min(10, max(5, max_results)) if time_range else max_results
+    data = _post_metaso(api_key, search_query, candidate_count, include_raw_content)
 
     webpages = data.get("webpages", [])
     if not webpages:
@@ -266,6 +284,8 @@ def _search_metaso(
         current_time_context=current_time_context,
         search_query=search_query,
         content_max_chars=content_max_chars,
+        time_range=time_range,
+        result_limit=max_results,
     )
 
 
@@ -277,6 +297,7 @@ def _search_tavily(
     include_raw_content: bool = True,
     content_max_chars: int = 3000,
     include_time_context: bool = True,
+    time_range: str = None,
 ) -> str:
     """调用Tavily搜索API"""
     current_time_context = current_time_context or _get_beijing_time_context()
@@ -292,11 +313,13 @@ def _search_tavily(
     )
     payload = {
         "query": search_query,
-        "max_results": max_results,
+        "max_results": min(10, max(5, max_results)) if time_range else max_results,
         "search_depth": "advanced",
         "include_answer": "advanced",
         "include_raw_content": include_raw_content,
     }
+    if time_range:
+        payload["time_range"] = time_range
     logger.bind(tag=TAG).debug(f"Tavily搜索请求 | URL: {url} | payload: {payload}")
     response = requests.post(url, json=payload, headers=headers, timeout=15)
     response.raise_for_status()
@@ -321,11 +344,13 @@ def _search_tavily(
         current_time_context=current_time_context,
         search_query=search_query,
         content_max_chars=content_max_chars,
+        time_range=time_range,
+        result_limit=max_results,
     )
 
 
 @register_function("web_search", WEB_SEARCH_FUNCTION_DESC, ToolType.SYSTEM_CTL)
-def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, **extra_args):
+def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, time_range: str = None, **extra_args):
     if lang or extra_args:
         logger.bind(tag=TAG).debug(
             f"web_search 忽略非核心参数 | lang={lang} | extra_args={extra_args}"
@@ -333,6 +358,10 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
     logger.bind(tag=TAG).info(f"web_search 被调用 | query={query}")
     if not query:
         return ActionResponse(Action.REQLLM, "请提供搜索关键词。", None)
+
+    if time_range is not None and (not isinstance(time_range, str) or time_range not in TIME_RANGES):
+        return ActionResponse(Action.REQLLM, "搜索时间范围无效，本次未查询，无法确认最新事实。", None,
+                              next_llm_tools_enabled=False, next_llm_system_prompt=_SEARCH_ERROR_FOLLOW_UP_PROMPT)
 
     web_search_config = conn.config.get("plugins", {}).get("web_search", {})
     provider = web_search_config.get("provider", "").lower()
@@ -373,6 +402,7 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
             include_raw_content=include_raw_content,
             include_time_context=include_time_context,
             content_max_chars=content_max_chars,
+            time_range=time_range,
         )
     elif provider == "tavily":
         search_fn = lambda: _search_tavily(
@@ -383,6 +413,7 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
             include_raw_content=include_raw_content,
             include_time_context=include_time_context,
             content_max_chars=content_max_chars,
+            time_range=time_range,
         )
     else:
         return ActionResponse(

@@ -317,3 +317,90 @@ def test_web_search_transport_error_stops_query_rewrites(monkeypatch):
     assert result.next_llm_tools_enabled is False
     assert "联网搜索请求超时" in result.result
     assert "不要通过改写查询重复调用搜索" in result.next_llm_system_prompt
+
+
+def test_freshness_filters_stale_unknown_empty_duplicates_and_provider_summary():
+    items = [
+        {"title": "今日", "date": "2026-10-17", "url": "https://example.com/a", "snippet": "这是有具体事实依据的今日新闻报道内容。"},
+        {"title": "重复", "date": "2026-10-17", "url": "https://example.com/a#top", "snippet": "同一页面的另一段足够长的新闻摘要内容。"},
+        {"title": "旧闻", "date": "2026-10-01", "snippet": "这是不应当作为今日新闻呈现的旧闻内容。"},
+        {"title": "无日期", "snippet": "没有提供日期的内容无法验证是否属于今日。"},
+        {"title": "空壳", "date": "2026-10-17", "content": "<div><img src='x'>导航</div>"},
+    ]
+    result = web_search._build_search_context("今天新闻", "test", items,
+        answer="供应商生成摘要不应绕过日期门控", current_time_context="2026-10-17 12:00 北京时间", time_range="day")
+    assert "1. 标题：今日" in result
+    assert "标题：旧闻" not in result
+    assert "标题：无日期" not in result
+    assert "标题：重复" not in result
+    assert "标题：空壳" not in result
+    assert "供应商生成摘要" not in result
+    assert "空内容 1，重复 1，时间不符 1，时效无法验证 1" in result
+
+
+def test_unfiltered_historical_query_preserves_old_sources_and_marks_unknown_date():
+    result = web_search._build_search_context("历史事件", "test", [
+        {"title": "历史", "date": "2000-01-01", "snippet": "这是一段有事实细节的历史事件资料内容。"},
+        {"title": "未知日期", "snippet": "这是一段没有提供日期但有事实细节的资料。"},
+    ])
+    assert "标题：历史" in result
+    assert "标题：未知日期" in result
+    assert "日期未知或无法解析" in result
+
+
+def test_tavily_sends_documented_time_range(monkeypatch):
+    captured = {}
+    class Response:
+        status_code = 200
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": []}
+    def post(url, json, **kwargs):
+        captured.update(json)
+        return Response()
+    monkeypatch.setattr(web_search.requests, "post", post)
+    web_search._search_tavily("test", "最近的新闻", 3, time_range="week")
+    assert captured["time_range"] == "week"
+
+
+def test_invalid_time_range_never_silently_searches_unfiltered(monkeypatch):
+    class Conn:
+        config = {}
+    result = web_search.web_search(Conn(), query="最新消息", time_range="anything")
+    assert "时间范围无效" in result.result
+    assert result.next_llm_tools_enabled is False
+
+
+def test_iso_dates_and_markup_only_evidence():
+    from plugins_func.functions.search_evidence import filter_evidence
+    items, excluded = filter_evidence([
+        {"date": "2026-10-17T10:00:00Z", "snippet": "这是一条具有准确日期和真实内容的新闻。"},
+        {"date": "2026-10-17", "content": "<script>lots of meaningless code here</script><img src='x'>"},
+    ], "day", "2026-10-17 12:00 北京时间")
+    assert len(items) == 1
+    assert excluded["empty"] == 1
+
+
+def test_metaso_expands_candidates_once_then_limits_usable_results(monkeypatch):
+    calls = []
+    def post(key, query, count, raw):
+        calls.append(count)
+        return {"webpages": [
+            {"title": "旧闻", "date": "2020-01-01", "snippet": "不应出现在本次最新新闻回答中的历史内容。"},
+            *[{"title": f"有效{i}", "date": "2026-10-17", "url": f"https://example.com/{i}", "snippet": f"这是第{i}条有独立事实细节的有效新闻内容。"} for i in range(4)]
+        ]}
+    monkeypatch.setattr(web_search, "_post_metaso", post)
+    result = web_search._search_metaso("test", "今天新闻", 2,
+        current_time_context="2026-10-17 12:00 北京时间", time_range="day")
+    assert calls == [5]
+    assert "标题：有效0" in result and "标题：有效1" in result
+    assert "标题：有效2" not in result and "标题：旧闻" not in result
+
+
+def test_timestamp_date_is_converted_to_beijing_and_unknown_zone_is_not_invented():
+    from plugins_func.functions.search_evidence import parse_date
+    assert str(parse_date("2026-10-16T20:00:00Z")) == "2026-10-17"
+    assert str(parse_date("2026-10-17T23:00:00-04:00")) == "2026-10-18"
+    assert parse_date("2026-10-17T12:00:00") is None
+    assert parse_date("2026-02-30") is None

@@ -169,6 +169,8 @@ class ServerPluginExecutor(ToolExecutor):
                 # 新闻插件：根据配置更新新闻源参数描述
                 if func_name == "get_news_from_newsnow":
                     self._init_news_source_description(tool_description, func_name)
+                elif func_name == "get_news_from_chinanews":
+                    self._init_chinanews_description(tool_description)
                 elif func_name == "play_music":
                     self._init_music_description(tool_description)
                 elif func_name == "web_search":
@@ -238,12 +240,54 @@ class ServerPluginExecutor(ToolExecutor):
         except (KeyError, TypeError):
             pass
 
+    def _init_chinanews_description(self, tool_description):
+        """Expose the actual feed contract even with an older catalog prompt."""
+        from plugins_func.functions.get_news_from_chinanews import get_supported_categories
+
+        categories = get_supported_categories(
+            self._get_plugin_config("get_news_from_chinanews")
+        )
+        guidance = (
+            "实际能力约束优先：本工具仅取配置新闻源的一条新闻，不能提供热点排行、"
+            "多条热点汇总或任意主题检索。指定类别只能使用category枚举中的值，"
+            "不支持的类别不得替换成社会新闻；不指定类别才使用默认新闻源。"
+        )
+        if (
+            "web_search" in configured_function_names(self.config)
+            and "web_search" in all_function_registry
+            and not self._is_declarative_interaction_plugin("web_search")
+        ):
+            guidance += "热点汇总、指定主题或实时榜单应选择当前可用的web_search检索。"
+        else:
+            guidance += "当前未启用网页搜索；超出本工具能力时说明限制，不得声称已检索或编造新闻。"
+        try:
+            function_desc = tool_description["function"]
+            function_desc["description"] = guidance + " " + str(
+                function_desc.get("description") or ""
+            )
+            properties = function_desc["parameters"]["properties"]
+            if not categories:
+                # An empty enum is rejected by some model APIs. With only a
+                # default feed, omit the optional selector altogether.
+                properties.pop("category", None)
+                return
+            category_schema = properties["category"]
+            category_schema["enum"] = categories
+            category_schema["description"] = (
+                "可选，仅允许当前已配置的类别：" + "、".join(categories)
+                + "。未指定类别时省略此参数，使用默认源；不能将不支持的类别改写成默认类别。"
+            )
+        except (KeyError, TypeError):
+            pass
+
     def _init_web_search_description(self, tool_description):
         """Keep web search routing precise even when backend config overrides description."""
         guidance = (
             " 仅用于用户要求的联网检索或最新外部事实，不用于本地知识库、播放或设备控制。"
             "相对时间依据本轮system中的北京时间；查询保留原话的相对时间、绝对日期、对象及事实目标，"
             "不得改成泛泛资料或补充未确认的对象、地点、日期。"
+            "时效检索同时设置time_range：今天为day，最近或最新通常为week，"
+            "用户明确范围优先，可选day/week/month/year；历史查询或无时效要求时省略。"
         )
         try:
             function_desc = tool_description["function"]
