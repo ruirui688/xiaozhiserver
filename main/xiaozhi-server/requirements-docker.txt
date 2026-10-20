@@ -5,7 +5,7 @@
 # Aliyun, Tencent, Xunfei, OpenAI-compatible ASR, FunASR server, or other
 # network services. It intentionally does not install torch, torchaudio, or
 # funasr, so Docker builds are much faster and the image is smaller.
-numpy==1.26.4
+numpy==2.5.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
 websockets==14.2
