@@ -8,7 +8,7 @@
 numpy==1.26.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
-websockets==14.2
+websockets==17.2
 #--------- 以下是可升级的依赖
 pyyml==0.0.2
 opuslib_next==1.1.5
