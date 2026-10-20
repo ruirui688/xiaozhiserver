@@ -5,7 +5,7 @@
 # PyTorch, torchaudio, and FunASR. Docker builds use
 # requirements-docker.txt + requirements-docker-funasr-extra.txt so lite and
 # FunASR images can share the common/lite cache layers.
-numpy==1.26.4
+numpy==2.5.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
 websockets==14.2
